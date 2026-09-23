@@ -1,10 +1,15 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import ConfirmModal from "@/components/ConfirmModal";
 import { useAuth } from "@/context/AuthContext";
+import { deleteProduct } from "@/lib/api/products";
+import { applyProductChanges } from "@/lib/productStore";
+import { removeStoredProduct } from "@/lib/productStore";
 
 export default function ProductsPage() {
   const { status } = useAuth();
@@ -16,6 +21,8 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState("");
+  const [productToDelete, setProductToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (status === "guest") router.replace("/login");
@@ -37,7 +44,7 @@ export default function ProductsPage() {
 
         const productsData = await productsResponse.json();
         const categoriesData = await categoriesResponse.json();
-        setProducts(productsData.products || []);
+        setProducts(applyProductChanges(productsData.products || []));
         setCategories(
           categoriesData.map((item) => (typeof item === "string" ? item : item.slug))
         );
@@ -70,13 +77,28 @@ export default function ProductsPage() {
     });
   }, [products, search, category, sort]);
 
+  async function handleDelete() {
+    if (!productToDelete) return;
+    setDeleting(true);
+    try {
+      if (!productToDelete.__local) await deleteProduct(productToDelete.id);
+      removeStoredProduct(productToDelete.id);
+      setProducts((current) => current.filter((product) => product.id !== productToDelete.id));
+      setProductToDelete(null);
+    } catch (requestError) {
+      setError(requestError.message || "Could not delete product.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (status !== "authenticated") return null;
 
   return (
     <>
       <Navbar />
       <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-        <h1 className="text-xl font-semibold text-ink">Products</h1>
+        <div className="flex items-center justify-between gap-3"><h1 className="text-xl font-semibold text-ink">Products</h1><Link href="/products/new" className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white">Add product</Link></div>
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <input
@@ -135,21 +157,25 @@ export default function ProductsPage() {
                   <th className="px-4 py-3 font-medium">Price</th>
                   <th className="px-4 py-3 font-medium">Rating</th>
                   <th className="px-4 py-3 font-medium">Stock</th>
+                  <th className="px-4 py-3 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleProducts.map((product) => (
                   <tr key={product.id} className="border-b border-line last:border-0">
-                    <td className="flex items-center gap-3 px-4 py-3 font-medium text-ink">
+                    <td className="px-4 py-3 font-medium text-ink">
+                      <Link href={`/products/${product.id}`} className="flex items-center gap-3 hover:underline">
                       <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-paper">
                         <Image src={product.thumbnail} alt={product.title} fill sizes="48px" className="object-cover" />
                       </div>
                       {product.title}
+                      </Link>
                     </td>
                     <td className="px-4 py-3 capitalize text-ink/70">{product.category}</td>
                     <td className="px-4 py-3">${product.price}</td>
                     <td className="px-4 py-3">{Number(product.rating).toFixed(1)}</td>
                     <td className="px-4 py-3">{product.stock}</td>
+                    <td className="px-4 py-3"><div className="flex justify-end gap-2"><Link href={`/products/${product.id}/edit`} className="rounded-md border border-line px-2.5 py-1 text-xs font-medium hover:bg-paper">Edit</Link><button onClick={() => setProductToDelete(product)} className="rounded-md border border-warn/40 px-2.5 py-1 text-xs font-medium text-warn hover:bg-warn/10">Delete</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -157,6 +183,7 @@ export default function ProductsPage() {
           </div>
         )}
       </main>
+      <ConfirmModal open={!!productToDelete} title="Delete this product?" message={productToDelete ? `"${productToDelete.title}" will be removed.` : ""} busy={deleting} onConfirm={handleDelete} onCancel={() => setProductToDelete(null)} />
     </>
   );
 }
